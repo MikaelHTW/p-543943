@@ -9,17 +9,32 @@
 const fs = require('fs');
 const path = require('path');
 
-// Get repository name from package.json or git
+// Get repository name from git or environment
 function getRepoName() {
   try {
+    // First try to get from environment variables (for GitHub Actions)
+    if (process.env.GITHUB_REPOSITORY) {
+      return process.env.GITHUB_REPOSITORY.split('/')[1];
+    }
+    
     // Try to get from git
     const gitConfigPath = path.resolve('.git/config');
     if (fs.existsSync(gitConfigPath)) {
       const gitConfig = fs.readFileSync(gitConfigPath, 'utf8');
-      const urlMatch = gitConfig.match(/url = .*github\.com[:/](.*?)\.git/);
-      if (urlMatch && urlMatch[1]) {
-        const parts = urlMatch[1].split('/');
-        return parts[parts.length - 1];
+      
+      // Try different patterns of GitHub URLs
+      const patterns = [
+        /url = .*github\.com[:/](.*?)\.git/,
+        /url = .*github\.com[:/](.*?)(?:\.git)?$/,
+        /url = .*github\.com\/([^\/]+\/[^\/]+)/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = gitConfig.match(pattern);
+        if (match && match[1]) {
+          const parts = match[1].split('/');
+          return parts[parts.length - 1];
+        }
       }
     }
   } catch (e) {
@@ -27,20 +42,33 @@ function getRepoName() {
   }
   
   // Default to portfolio if we can't detect the repo name
+  console.warn('Could not detect repository name, using "portfolio" as fallback');
   return 'portfolio';
 }
 
 const repoName = getRepoName();
+console.log(`Detected repository name: ${repoName}`);
+
 const viteConfigPath = path.resolve('vite.config.ts');
 
 if (fs.existsSync(viteConfigPath)) {
   let viteConfig = fs.readFileSync(viteConfigPath, 'utf8');
   
-  // Replace the placeholder with the actual repo name
-  viteConfig = viteConfig.replace(
-    "base: process.env.NODE_ENV === 'production' ? '/{repo-name}/' : '/',",
-    `base: process.env.NODE_ENV === 'production' ? '/${repoName}/' : '/',`
-  );
+  // Replace the placeholder or old value with the actual repo name
+  if (viteConfig.includes('/{repo-name}/')) {
+    viteConfig = viteConfig.replace(
+      "base: process.env.NODE_ENV === 'production' ? '/{repo-name}/' : '/',",
+      `base: process.env.NODE_ENV === 'production' ? '/${repoName}/' : '/',`
+    );
+  } else {
+    // If the pattern doesn't exist, check if base is already defined and update it
+    if (viteConfig.includes("base: process.env.NODE_ENV === 'production'")) {
+      viteConfig = viteConfig.replace(
+        /base: process.env.NODE_ENV === 'production' \? '\/.*?\/' : '\/'/,
+        `base: process.env.NODE_ENV === 'production' ? '/${repoName}/' : '/'`
+      );
+    }
+  }
   
   fs.writeFileSync(viteConfigPath, viteConfig);
   console.log(`Updated vite.config.ts with base path: /${repoName}/`);
