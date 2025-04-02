@@ -1,6 +1,4 @@
 
-#!/usr/bin/env node
-
 /**
  * This script updates the base path in vite.config.ts before building
  * It should be run before the npm run build command when deploying to GitHub Pages
